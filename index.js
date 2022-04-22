@@ -29,7 +29,7 @@ const gRpcOptions = {
 }
 const packageDefinition = protoLoader.loadSync('spacex/api/device/service.proto', gRpcOptions);
 const Device  = grpc.loadPackageDefinition(packageDefinition).SpaceX.API.Device.Device;
-const client = new Device(
+var client = new Device(
     "192.168.100.1:9200",
     grpc.credentials.createInsecure()
 );
@@ -38,6 +38,7 @@ var dishyStatus;
 var stowRequested;
 var positions = [];
 var gpsSource;
+var errorCount = 0;
 
 module.exports = function(app) {
   var plugin = {};
@@ -84,6 +85,14 @@ module.exports = function(app) {
   	}, (error, response) => {
 	  if (error) {
 	    app.debug(`Error reading from Dishy.`);
+	    if (errorCount++ > 30) {
+              client = new Device(
+    		"192.168.100.1:9200",
+    		grpc.credentials.createInsecure()
+	      );
+	      errorCount = 0;
+	      app.debug(`Retrying connection`);
+	    }
 	    return;
 	  }
 	  let values;
@@ -99,8 +108,28 @@ module.exports = function(app) {
 	        value: 'offline'
 	      },
 	      {
-	        path: `${STARLINK}.outage`,
-	        value: response.dish_get_status.outage
+	        path: `${STARLINK}.outage.cause`,
+	        value: response.dish_get_status.outage.cause
+	      },
+	      {
+	        path: `${STARLINK}.outage.start`,
+	        value: new Date(response.dish_get_status.outage.start_timestamp_ns/1000/1000)
+	      },
+	      {
+	        path: `${STARLINK}.outage.duration`,
+	        value: response.dish_get_status.outage.duration_ns/1000/1000/1000
+	      },
+	      {
+	        path: `${STARLINK}.uptime`,
+	        value: response.dish_get_status.device_state.uptime_s
+	      },
+	      {
+	        path: `${STARLINK}.hardware`,
+	        value: response.dish_get_status.device_info.hardware_version
+	      },
+	      {
+	        path: `${STARLINK}.software`,
+	        value: response.dish_get_status.device_info.software_version
 	      }
 	    ];
 	  } else {
@@ -112,6 +141,18 @@ module.exports = function(app) {
 	      {
 	        path: `${STARLINK}.status`,
 	        value: 'online'
+	      },
+	      {
+	        path: `${STARLINK}.uptime`,
+	        value: response.dish_get_status.device_state.uptime_s
+	      },
+	      {
+	        path: `${STARLINK}.hardware`,
+	        value: response.dish_get_status.device_info.hardware_version
+	      },
+	      {
+	        path: `${STARLINK}.software`,
+	        value: response.dish_get_status.device_info.software_version
 	      },
 	      {
 	        path: `${STARLINK}.downlink_throughput`,

@@ -1,4 +1,4 @@
-# Signal K Plugin for StarLink
+# Signal K Plugin for Starlink
 
 This plugin allows getting statistics from Starlink Dishy and allows auto-stowing it while the vessel is moving. It will automatically unstow the Dishy when the vessels becomes stationary again at an anchorage or dock. It will take 10 minutes for the plugin to detect if the vessel is moving or stationary.
 

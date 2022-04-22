@@ -127,7 +127,7 @@ module.exports = function(app) {
 	      }
 	    ];
 	  }
-	  app.handleMessage('signalk-ecowitt', {
+	  app.handleMessage('signalk-starlink', {
             updates: [
               {
                 values: values

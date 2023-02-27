@@ -130,6 +130,10 @@ module.exports = function(app) {
 	      {
 	        path: `${STARLINK}.software`,
 	        value: response.dish_get_status.device_info.software_version
+	      },
+	      {
+	        path: `${STARLINK}.alerts`,
+	        value: response.dish_get_status.alerts
 	      }
 	    ];
 	  } else {
@@ -156,15 +160,19 @@ module.exports = function(app) {
 	      },
 	      {
 	        path: `${STARLINK}.downlink_throughput`,
-	        value: response.dish_get_status.downlink_throughput_bps
+	        value: response.dish_get_status.downlink_throughput_bps || 0
 	      },
 	      {
 	        path: `${STARLINK}.uplink_throughput`,
-	        value: response.dish_get_status.uplink_throughput_bps
+	        value: response.dish_get_status.uplink_throughput_bps || 0
 	      },
 	      {
 	        path: `${STARLINK}.latency`,
 	        value: response.dish_get_status.pop_ping_latency_ms
+	      },
+	      {
+	        path: `${STARLINK}.alerts`,
+	        value: response.dish_get_status.alerts
 	      }
 	    ];
 	  }
@@ -267,7 +275,7 @@ module.exports = function(app) {
 	    app.debug (`Vessel is moving, stowing Dishy.`);
 	    stowDishy();
 	  } else {
-	    app.debug(`Vessel is moving but Dishy is offline.`);
+	    app.debug(`Vessel is moving but Dishy is not online.`);
 	  }
 	} else {
 	  if (dishyStatus == "online") {

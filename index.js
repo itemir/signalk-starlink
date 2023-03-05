@@ -81,6 +81,33 @@ module.exports = function(app) {
 
     pollProcess = setInterval( function() {
     	client.Handle({
+    	  'get_location': {}
+  	}, (error, response) => {
+	  if (error) {
+	    return;
+	  }
+	  let latitude = response.get_location.lla.lat;
+	  let longitude = response.get_location.lla.lon;
+	  let values = [
+	    {
+	      path: 'navigation.position',
+	      value: {
+		'longitude': longitude,
+		'latitude': latitude
+	      }
+	    }
+	  ]
+	  app.handleMessage('signalk-starlink', {
+            updates: [
+              {
+                values: values
+              }
+            ]
+          });
+          app.debug(`Position received from Starlink (${latitude}, ${longitude})`);
+	});
+
+    	client.Handle({
     	  'get_status': {}
   	}, (error, response) => {
 	  if (error) {

@@ -1,6 +1,6 @@
 {
   "name": "signalk-starlink",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "StarLink plugin for Signal K",
   "main": "index.js",
   "scripts": {

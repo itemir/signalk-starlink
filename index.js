@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Ilker Temir <ilker@ilkertemir.com>
+ * Copyright 2022-2024 Ilker Temir <ilker@ilkertemir.com>
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-const POLL_STARLINK_INTERVAL = 2      // Poll every N seconds
+const POLL_STARLINK_INTERVAL = 15      // Poll every N seconds
 const STARLINK = 'network.providers.starlink'
 
 const path = require('path');
@@ -39,6 +39,8 @@ var stowRequested;
 var positions = [];
 var gpsSource;
 var errorCount = 0;
+var previousLatitude;
+var previousLongitude;
 
 module.exports = function(app) {
   var plugin = {};
@@ -53,6 +55,11 @@ module.exports = function(app) {
     type: 'object',
     required: [],
     properties: {
+      retrieveGps: {
+        type: "boolean",
+        title: "Use Starlink as a GPS source (requires enabling access on local network)",
+	default: false
+      },
       stowWhileMoving: {
         type: "boolean",
         title: "Stow Dishy while moving",
@@ -80,139 +87,164 @@ module.exports = function(app) {
     }, data => processDelta(options, data));
 
     pollProcess = setInterval( function() {
-    	client.Handle({
-    	  'get_location': {}
-  	}, (error, response) => {
-	  if (error) {
-	    return;
-	  }
-	  let latitude = response.get_location.lla.lat;
-	  let longitude = response.get_location.lla.lon;
-	  let values = [
-	    {
-	      path: 'navigation.position',
-	      value: {
-		'longitude': longitude,
-		'latitude': latitude
-	      }
-	    }
-	  ]
-	  app.handleMessage('signalk-starlink', {
-            updates: [
+      if (options.retrieveGps) {
+          client.Handle({
+            'get_location': {}
+          }, (error, response) => {
+          if (error) {
+            app.debug('Cannot retrieve position from Starlink');
+            return;
+          }
+          let latitude = response.get_location.lla.lat;
+          let longitude = response.get_location.lla.lon;
+          let values;
+          if ((previousLatitude) && (previousLongitude)) {
+            courseAndSpeedOverGround = calculateCourseAndSpeed(
+              previousLatitude,
+              previousLongitude,
+              latitude,
+              longitude
+            );
+            values = [
               {
-                values: values
+                path: 'navigation.position',
+                value: {
+                  'longitude': longitude,
+                  'latitude': latitude
+                },
+                }, {
+                  path: 'navigation.courseOverGroundTrue',
+                  value: courseAndSpeedOverGround.course
+                }, {
+                  path: 'navigation.speedOverGround',
+                  value: courseAndSpeedOverGround.speed
+                }
+            ]
+          } else {
+            values = [
+              {
+                path: 'navigation.position',
+                value: {
+                  'longitude': longitude,
+                  'latitude': latitude
+                }
               }
             ]
+                }
+          app.handleMessage('signalk-starlink', {
+            updates: [{
+                values: values
+              }]
           });
+          previousLatitude = latitude;
+          previousLongitude = longitude;
           app.debug(`Position received from Starlink (${latitude}, ${longitude})`);
-	});
+        });
+      }
 
     	client.Handle({
     	  'get_status': {}
-  	}, (error, response) => {
-	  if (error) {
-	    app.debug(`Error reading from Dishy.`);
-	    if (errorCount++ > 30) {
-              client = new Device(
-    		"192.168.100.1:9200",
-    		grpc.credentials.createInsecure()
-	      );
-	      errorCount = 0;
-	      app.debug(`Retrying connection`);
-	    }
-	    return;
-	  }
-	  let values;
-          if (response.dish_get_status.outage) {
-	    let duration = response.dish_get_status.outage.duration_ns / 1000 / 1000 /1000;
-	    duration = timeSince(duration);
-            app.setPluginStatus(`Starlink has been offline (${response.dish_get_status.outage.cause}) for ${duration}`);
-	    dishyStatus = response.dish_get_status.outage.cause;
- 
-	    values = [
-	      {
-	        path: `${STARLINK}.status`,
-	        value: 'offline'
-	      },
-	      {
-	        path: `${STARLINK}.outage.cause`,
-	        value: response.dish_get_status.outage.cause
-	      },
-	      {
-	        path: `${STARLINK}.outage.start`,
-	        value: new Date(response.dish_get_status.outage.start_timestamp_ns/1000/1000)
-	      },
-	      {
-	        path: `${STARLINK}.outage.duration`,
-	        value: response.dish_get_status.outage.duration_ns/1000/1000/1000
-	      },
-	      {
-	        path: `${STARLINK}.uptime`,
-	        value: response.dish_get_status.device_state.uptime_s
-	      },
-	      {
-	        path: `${STARLINK}.hardware`,
-	        value: response.dish_get_status.device_info.hardware_version
-	      },
-	      {
-	        path: `${STARLINK}.software`,
-	        value: response.dish_get_status.device_info.software_version
-	      },
-	      {
-	        path: `${STARLINK}.alerts`,
-	        value: response.dish_get_status.alerts
-	      }
-	    ];
-	  } else {
-	    if (dishyStatus != "online") {
-              app.setPluginStatus('Starlink is online');
-	      dishyStatus = "online";
-	    }
-	    values = [
-	      {
-	        path: `${STARLINK}.status`,
-	        value: 'online'
-	      },
-	      {
-	        path: `${STARLINK}.uptime`,
-	        value: response.dish_get_status.device_state.uptime_s
-	      },
-	      {
-	        path: `${STARLINK}.hardware`,
-	        value: response.dish_get_status.device_info.hardware_version
-	      },
-	      {
-	        path: `${STARLINK}.software`,
-	        value: response.dish_get_status.device_info.software_version
-	      },
-	      {
-	        path: `${STARLINK}.downlink_throughput`,
-	        value: response.dish_get_status.downlink_throughput_bps || 0
-	      },
-	      {
-	        path: `${STARLINK}.uplink_throughput`,
-	        value: response.dish_get_status.uplink_throughput_bps || 0
-	      },
-	      {
-	        path: `${STARLINK}.latency`,
-	        value: response.dish_get_status.pop_ping_latency_ms
-	      },
-	      {
-	        path: `${STARLINK}.alerts`,
-	        value: response.dish_get_status.alerts
-	      }
-	    ];
-	  }
-	  app.handleMessage('signalk-starlink', {
-            updates: [
-              {
-                values: values
-              }
-            ]
-          });
-	});
+  	  }, (error, response) => {
+	      if (error) {
+	        app.debug(`Error reading from Dishy.`);
+	        if (errorCount++ > 30) {
+            client = new Device(
+    		      "192.168.100.1:9200",
+    		      grpc.credentials.createInsecure()
+	          );
+            errorCount = 0;
+            app.debug(`Retrying connection`);
+	        }
+	        return;
+        }
+        let values;
+        if (response.dish_get_status.outage) {
+          let duration = response.dish_get_status.outage.duration_ns / 1000 / 1000 /1000;
+          duration = timeSince(duration);
+          app.setPluginStatus(`Starlink has been offline (${response.dish_get_status.outage.cause}) for ${duration}`);
+          dishyStatus = response.dish_get_status.outage.cause;
+    
+          values = [
+            {
+              path: `${STARLINK}.status`,
+              value: 'offline'
+            },
+            {
+              path: `${STARLINK}.outage.cause`,
+              value: response.dish_get_status.outage.cause
+            },
+            {
+              path: `${STARLINK}.outage.start`,
+              value: new Date(response.dish_get_status.outage.start_timestamp_ns/1000/1000)
+            },
+            {
+              path: `${STARLINK}.outage.duration`,
+              value: response.dish_get_status.outage.duration_ns/1000/1000/1000
+            },
+            {
+              path: `${STARLINK}.uptime`,
+              value: response.dish_get_status.device_state.uptime_s
+            },
+            {
+              path: `${STARLINK}.hardware`,
+              value: response.dish_get_status.device_info.hardware_version
+            },
+            {
+              path: `${STARLINK}.software`,
+              value: response.dish_get_status.device_info.software_version
+            },
+            {
+              path: `${STARLINK}.alerts`,
+              value: response.dish_get_status.alerts
+            }
+          ];
+	      } else {
+          if (dishyStatus != "online") {
+            app.setPluginStatus('Starlink is online');
+            dishyStatus = "online";
+          }
+          values = [
+            {
+              path: `${STARLINK}.status`,
+              value: 'online'
+            },
+            {
+              path: `${STARLINK}.uptime`,
+              value: response.dish_get_status.device_state.uptime_s
+            },
+            {
+              path: `${STARLINK}.hardware`,
+              value: response.dish_get_status.device_info.hardware_version
+            },
+            {
+              path: `${STARLINK}.software`,
+              value: response.dish_get_status.device_info.software_version
+            },
+            {
+              path: `${STARLINK}.downlink_throughput`,
+              value: response.dish_get_status.downlink_throughput_bps || 0
+            },
+            {
+              path: `${STARLINK}.uplink_throughput`,
+              value: response.dish_get_status.uplink_throughput_bps || 0
+            },
+            {
+              path: `${STARLINK}.latency`,
+              value: response.dish_get_status.pop_ping_latency_ms
+            },
+            {
+              path: `${STARLINK}.alerts`,
+              value: response.dish_get_status.alerts
+            }
+          ];
+        }
+        app.handleMessage('signalk-starlink', {
+          updates: [{
+              values: values
+          }]
+        });
+      });
     }, POLL_STARLINK_INTERVAL * 1000);
-
   }
 
   plugin.stop =  function() {
@@ -271,50 +303,50 @@ module.exports = function(app) {
 
     switch (path) {
       case 'navigation.position':
-	if (!gpsSource) {
-	  gpsSource = source;
-	  app.debug(`Setting GPS source to ${source}.`);
-	} else if (gpsSource != source) {
-	  app.debug(`Ignoring position from ${source}.`);
-	  break;
-	}
+        if (!gpsSource) {
+          gpsSource = source;
+          app.debug(`Setting GPS source to ${source}.`);
+        } else if (gpsSource != source) {
+          app.debug(`Ignoring position from ${source}.`);
+          break;
+        }
         positions.unshift({
-	  latitude: value.latitude,
-	  longitude: value.longitude
-	});
+          latitude: value.latitude,
+          longitude: value.longitude
+	      });
         positions = positions.slice(0, 10);         // Keep 10 minutes of positions
-	if (positions.length < 10) {
-	  app.debug(`Not enough position reports yet (${positions.length}) to calculate distance.`);
-	  break;
-	}
-	let distance = 0;
-	for (let i=1;i < positions.length;i++) {
-	  let previousPosition = positions[i-1];
-	  let position = positions[i];
-	  distance = distance + calculateDistance(position.latitude,
-		  				  position.longitude,
-		  				  previousPosition.latitude,
-		  				  previousPosition.longitude);
-	}
-	app.debug (`Distance covered in the last 10 minutes is ${distance} miles.`);
-	if (options.stowWhileMoving && (distance >= 0.15)) {
-	  if (dishyStatus == "online") {
-	    app.debug (`Vessel is moving, stowing Dishy.`);
-	    stowDishy();
-	  } else {
-	    app.debug(`Vessel is moving but Dishy is not online.`);
-	  }
-	} else {
-	  if (dishyStatus == "online") {
-	    app.debug (`Vessel is stationary, and dishy is not stowed.`);
-	  } else if (dishyStatus == "STOWED") {
-	    if (stowRequested) {
-	      app.debug (`Vessel is stationary, and we previously stowed Dishy. Unstowing.`);
-	      unstowDishy();
-	    } else {
-	      app.debug (`Vessel is stationary, and Dishy is stowed, but not by us. Ignoring.`);
-	    }
-	  }
+        if (positions.length < 10) {
+          app.debug(`Not enough position reports yet (${positions.length}) to calculate distance.`);
+          break;
+        }
+        let distance = 0;
+        for (let i=1;i < positions.length;i++) {
+          let previousPosition = positions[i-1];
+          let position = positions[i];
+          distance = distance + calculateDistance(position.latitude,
+                      position.longitude,
+                      previousPosition.latitude,
+                      previousPosition.longitude);
+        }
+        app.debug (`Distance covered in the last 10 minutes is ${distance} miles.`);
+        if (options.stowWhileMoving && (distance >= 0.15)) {
+          if (dishyStatus == "online") {
+            app.debug (`Vessel is moving, stowing Dishy.`);
+            stowDishy();
+          } else {
+            app.debug(`Vessel is moving but Dishy is not online.`);
+          }
+        } else {
+          if (dishyStatus == "online") {
+            app.debug (`Vessel is stationary, and dishy is not stowed.`);
+          } else if (dishyStatus == "STOWED") {
+            if (stowRequested) {
+              app.debug (`Vessel is stationary, and we previously stowed Dishy. Unstowing.`);
+              unstowDishy();
+            } else {
+              app.debug (`Vessel is stationary, and Dishy is stowed, but not by us. Ignoring.`);
+            }
+          }
         }	  
         break;
       case 'environment.wind.speedApparent':
@@ -346,6 +378,34 @@ module.exports = function(app) {
       return Math.floor(interval) + " minutes";
     }
     return Math.floor(seconds) + " seconds";
+  }
+
+
+  function haversine(lat1, lon1, lat2, lon2) {
+    const earthRadius = 6371e3; // Radius of the Earth in meters
+    // Convert latitude and longitude from degrees to radians
+    const lat1Rad = lat1 * Math.PI / 180;
+    const lon1Rad = lon1 * Math.PI / 180;
+    const lat2Rad = lat2 * Math.PI / 180;
+    const lon2Rad = lon2 * Math.PI / 180;
+    // Haversine formula
+    const dLat = lat2Rad - lat1Rad;
+    const dLon = lon2Rad - lon1Rad;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = earthRadius * c; // Distance in meters
+    return distance;
+  }
+
+  function calculateCourseAndSpeed(lat1, lon1, lat2, lon2) {
+    // Calculate distance between the two points
+    const distance = haversine(lat1, lon1, lat2, lon2);
+    // Calculate speed over ground (SOG) in meters per second
+    const speed = distance / POLL_STARLINK_INTERVAL;
+    // Calculate course over ground (COG) in radians
+    const angle = Math.atan2(lon2 - lon1, lat2 - lat1);
+    const course = angle < 0 ? angle + 2 * Math.PI : angle;
+    return { course, speed };
   }
 
   return plugin;

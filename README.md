@@ -4,7 +4,7 @@ This plugin facilitates obtaining statistics from Starlink Dishy and optionally 
 
 Starlink also includes a GPS. You can optionally utilize it as a backup GPS for your Signal K network or NMEA 2000. To do so, grant location access on the local network using the Starlink app. Navigate to your Starlink app, and follow `Advanced -> Debug Data -> Allow access on local network (at the very bottom)`. Additionally, toggle on the Use Starlink as a GPS source option in the plugin configuration.
 
-Currently, the plugin publishes the following information under network.providers.starlink:
+Currently, the plugin publishes the following information under `network.providers.starlink`:
 * `status`: Either "online" or "offline"
 * `hardware`: Starlink hardware version
 * `software`: Starlink software version

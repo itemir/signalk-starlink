@@ -1,8 +1,9 @@
 {
   "name": "signalk-starlink",
-  "version": "1.0.0",
-  "description": "StarLink plugin for Signal K",
+  "version": "1.1.0",
+  "description": "Starlink plugin for Signal K",
   "main": "index.js",
+  "signalk-plugin-enabled-by-default": true,
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -13,7 +14,7 @@
   "keywords": [
     "signalk-node-server-plugin"
   ],
-  "author": "Ilker Temir <ilker@ilkertemir.com>",
+  "author": "Ilker Temir",
   "license": "Apache-2.0",
   "bugs": {
     "url": "https://github.com/itemir/signalk-starlink/issues"

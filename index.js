@@ -58,12 +58,12 @@ module.exports = function(app) {
       retrieveGps: {
         type: "boolean",
         title: "Use Starlink as a GPS source (requires enabling access on local network)",
-	default: false
+	      default: true
       },
       stowWhileMoving: {
         type: "boolean",
         title: "Stow Dishy while moving",
-	default: false
+	      default: false
       },
       gpsSource: {
         type: "string",
@@ -147,7 +147,8 @@ module.exports = function(app) {
   	  }, (error, response) => {
 	      if (error) {
 	        app.debug(`Error reading from Dishy.`);
-	        if (errorCount++ > 30) {
+	        if (errorCount++ >= 5) {
+            client.close();
             client = new Device(
     		      "192.168.100.1:9200",
     		      grpc.credentials.createInsecure()

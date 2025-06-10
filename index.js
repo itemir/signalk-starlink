@@ -37,6 +37,7 @@ var client = new Device(
 var dishyStatus;
 var stowRequested;
 var positions = [];
+var gpsSource;
 var errorCount = 0;
 var previousLatitude;
 var previousLongitude;
@@ -58,7 +59,7 @@ module.exports = function(app) {
       retrieveGps: {
         type: "boolean",
         title: "Use Starlink as a GPS source (requires enabling access on local network)",
-        description: "Furhter instructions vailable at https://github.com/itemir/signalk-starlink/blob/main/README.md",
+        description: "Further instructions available at https://github.com/itemir/signalk-starlink/blob/main/README.md",
 	      default: true
       },
       gpsUpdateRate: {

@@ -45,7 +45,8 @@ var previousLongitude;
 module.exports = function(app) {
   var plugin = {};
   var unsubscribes = [];
-  var pollProcess;
+  var gpsPollProcess;
+  var dishdataPollProcess;
 
   plugin.id = "signalk-starlink";
   plugin.name = "Starlink";
@@ -58,7 +59,13 @@ module.exports = function(app) {
       retrieveGps: {
         type: "boolean",
         title: "Use Starlink as a GPS source (requires enabling access on local network)",
+        description: "Further instructions available at https://github.com/itemir/signalk-starlink/blob/main/README.md",
 	      default: true
+      },
+      gpsUpdateRate: {
+        type: 'number',
+        title: 'GPS data update rate (s)',
+        default: 1
       },
       stowWhileMoving: {
         type: "boolean",
@@ -67,7 +74,8 @@ module.exports = function(app) {
       },
       gpsSource: {
         type: "string",
-        title: "GPS source (Optional - only if you have multiple GPS sources and you want to use an explicit source)"
+        title: "GPS source (Optional - only if you have multiple GPS sources and you want to use an explicit source)",
+        description: "Used to determine is the vessel is underway for automatic stowing of Dishy.",
       },
       enableStatusNotification: {
         type: "boolean",
@@ -99,61 +107,7 @@ module.exports = function(app) {
       app.debug('Subscription error');
     }, data => processDelta(options, data));
 
-    pollProcess = setInterval( function() {
-      if (options.retrieveGps) {
-          client.Handle({
-            'get_location': {}
-          }, (error, response) => {
-          if (error) {
-            app.debug('Cannot retrieve position from Starlink');
-            return;
-          }
-          let latitude = response.get_location.lla.lat;
-          let longitude = response.get_location.lla.lon;
-          let values;
-          if ((previousLatitude) && (previousLongitude)) {
-            courseAndSpeedOverGround = calculateCourseAndSpeed(
-              previousLatitude,
-              previousLongitude,
-              latitude,
-              longitude
-            );
-            values = [
-              {
-                path: 'navigation.position',
-                value: {
-                  'longitude': longitude,
-                  'latitude': latitude
-                },
-                }, {
-                  path: 'navigation.courseOverGroundTrue',
-                  value: courseAndSpeedOverGround.course
-                }, {
-                  path: 'navigation.speedOverGround',
-                  value: courseAndSpeedOverGround.speed
-                }
-            ]
-          } else {
-            values = [
-              {
-                path: 'navigation.position',
-                value: {
-                  'longitude': longitude,
-                  'latitude': latitude
-                }
-              }
-            ]
-                }
-          app.handleMessage('signalk-starlink', {
-            updates: [{
-                values: values
-              }]
-          });
-          previousLatitude = latitude;
-          previousLongitude = longitude;
-          app.debug(`Position received from Starlink (${latitude}, ${longitude})`);
-        });
-      }
+    dishdataPollProcess = setInterval( function() {
 
     	client.Handle({
     	  'get_status': {}
@@ -284,11 +238,70 @@ module.exports = function(app) {
           })
         }
       });
-    }, POLL_STARLINK_INTERVAL * 1000);
+    }, POLL_STARLINK_INTERVAL * 1000)
+
+    gpsPollProcess = setInterval( function() {
+      if (options.retrieveGps) {
+          client.Handle({
+            'get_location': {}
+          }, (error, response) => {
+          if (error) {
+            app.debug('Cannot retrieve position from Starlink');
+            return;
+          }
+          let latitude = response.get_location.lla.lat;
+          let longitude = response.get_location.lla.lon;
+          let values;
+          if ((previousLatitude) && (previousLongitude)) {
+            courseAndSpeedOverGround = calculateCourseAndSpeed(
+              options.gpsUpdateRate,
+              previousLatitude,
+              previousLongitude,
+              latitude,
+              longitude
+            );
+            values = [
+              {
+                path: 'navigation.position',
+                value: {
+                  'longitude': longitude,
+                  'latitude': latitude
+                },
+                }, {
+                  path: 'navigation.courseOverGroundTrue',
+                  value: courseAndSpeedOverGround.course
+                }, {
+                  path: 'navigation.speedOverGround',
+                  value: courseAndSpeedOverGround.speed
+                }
+            ]
+          } else {
+            values = [
+              {
+                path: 'navigation.position',
+                value: {
+                  'longitude': longitude,
+                  'latitude': latitude
+                }
+              }
+            ]
+                }
+          app.handleMessage('signalk-starlink', {
+            updates: [{
+                values: values
+              }]
+          });
+          previousLatitude = latitude;
+          previousLongitude = longitude;
+          app.debug(`Position received from Starlink (${latitude}, ${longitude})`);
+        });
+      }
+    }, options.gpsUpdateRate * 1000);
   }
 
   plugin.stop =  function() {
-    clearInterval(pollProcess);
+    clearInterval(dishdataPollProcess);
+    clearInterval(gpsPollProcess);
     app.setPluginStatus('Pluggin stopped');
   };
 
@@ -437,7 +450,7 @@ module.exports = function(app) {
     return distance;
   }
 
-  function calculateCourseAndSpeed(lat1, lon1, lat2, lon2) {
+  function calculateCourseAndSpeed(interval, lat1, lon1, lat2, lon2) {
     // Calculate distance between the two points
     const distance = haversine(lat1, lon1, lat2, lon2);
     // Calculate speed over ground (SOG) in meters per second

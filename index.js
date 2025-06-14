@@ -69,6 +69,19 @@ module.exports = function(app) {
         type: "string",
         title: "GPS source (Optional - only if you have multiple GPS sources and you want to use an explicit source)"
       },
+      enableStatusNotification: {
+        type: "boolean",
+        title: "Send a notification when offline",
+	default: true
+      },
+      statusNotificationState: {
+        title: 'State',
+        description:
+          'When an offline notifcation is sent, this wil be used as the notitication state',
+        type: 'string',
+        default: 'warn',
+        enum: ['alert', 'warn', 'alarm', 'emergency']
+      },
     }
   }
 
@@ -199,7 +212,7 @@ module.exports = function(app) {
               value: response.dish_get_status.alerts
             }
           ];
-	      } else {
+	} else {
           if (dishyStatus != "online") {
             app.setPluginStatus('Starlink is online');
             dishyStatus = "online";
@@ -244,6 +257,32 @@ module.exports = function(app) {
               values: values
           }]
         });
+
+        if ( options.enableStatusNotification === undefined || options.enableStatusNotification === true ) {
+          const path = `notifications.${STARLINK}.state`
+          let state = dishyStatus !== 'online'
+              ? options.statusNotificationState || 'warn'
+              : 'normal'
+          
+          let method = ['visual', 'sound']
+          const existing = app.getSelfPath(path)
+          if (existing && existing.state !== 'normal' && existing.method ) {
+            method = existing.method
+          }
+          const status = dishyStatus === 'online' ? 'online' : 'offline'
+          app.handleMessage('signalk-starlink', {
+            updates: [{
+              values: [{
+                path, 
+                value: {
+                  state,
+                  method,
+                  message: `starlink is ${status}`
+                }   
+              }]
+            }]
+          })
+        }
       });
     }, POLL_STARLINK_INTERVAL * 1000);
   }

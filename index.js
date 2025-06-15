@@ -86,18 +86,20 @@ module.exports = function(app) {
   }
 
   plugin.start = function(options) {
-    gpsSource = options.gpsSource;
-    let subscription = {
-      context: 'vessels.self',
-      subscribe: [{
-        path: 'navigation.position',
-        period: 60 * 1000     // Every minute
-      }]
-    };
+    if ( options.stowWhileMoving ) {
+      gpsSource = options.gpsSource;
+      let subscription = {
+        context: 'vessels.self',
+        subscribe: [{
+          path: 'navigation.position',
+          period: 60 * 1000     // Every minute
+        }]
+      };
 
-    app.subscriptionmanager.subscribe(subscription, unsubscribes, function() {
-      app.debug('Subscription error');
-    }, data => processDelta(options, data));
+      app.subscriptionmanager.subscribe(subscription, unsubscribes, function() {
+        app.debug('Subscription error');
+      }, data => processDelta(options, data));
+    }
 
     pollProcess = setInterval( function() {
       if (options.retrieveGps) {

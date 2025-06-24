@@ -13,8 +13,11 @@
  * limitations under the License.
  */
 
-const POLL_STARLINK_INTERVAL = 15      // Poll every N seconds
 const STARLINK = 'network.providers.starlink'
+
+const POLL_STARLINK_INTERVAL = 15; // Poll every 15 seconds
+const POLL_GPS_INTERVAL = 1; // Poll every second
+const SPEED_SMOOTHING_RANGE = 10; // How many speed values to average
 
 const path = require('path');
 const protoLoader = require('@grpc/proto-loader');
@@ -42,6 +45,8 @@ var errorCount = 0;
 var previousLatitude;
 var previousLongitude;
 
+var recordedSpeeds=[];
+
 module.exports = function(app) {
   var plugin = {};
   var unsubscribes = [];
@@ -62,11 +67,6 @@ module.exports = function(app) {
         description: "Further instructions available at https://github.com/itemir/signalk-starlink/blob/main/README.md",
 	      default: true
       },
-      gpsUpdateRate: {
-        type: 'number',
-        title: 'GPS data update rate (s)',
-        default: 1
-      },
       stowWhileMoving: {
         type: "boolean",
         title: "Stow Dishy while moving",
@@ -75,7 +75,7 @@ module.exports = function(app) {
       gpsSource: {
         type: "string",
         title: "GPS source (Optional - only if you have multiple GPS sources and you want to use an explicit source)",
-        description: "Used to determine is the vessel is underway for automatic stowing of Dishy.",
+        description: "Used to determine if the vessel is underway for automatic stowing of Dishy.",
       },
     }
   }
@@ -215,12 +215,15 @@ module.exports = function(app) {
           let values;
           if ((previousLatitude) && (previousLongitude)) {
             courseAndSpeedOverGround = calculateCourseAndSpeed(
-              options.gpsUpdateRate,
+              POLL_GPS_INTERVAL,
               previousLatitude,
               previousLongitude,
               latitude,
               longitude
             );
+
+            recordSpeed(courseAndSpeedOverGround.speed);
+
             values = [
               {
                 path: 'navigation.position',
@@ -233,7 +236,7 @@ module.exports = function(app) {
                   value: courseAndSpeedOverGround.course
                 }, {
                   path: 'navigation.speedOverGround',
-                  value: courseAndSpeedOverGround.speed
+                  value: smoothSpeed()
                 }
             ]
           } else {
@@ -257,7 +260,7 @@ module.exports = function(app) {
           app.debug(`Position received from Starlink (${latitude}, ${longitude})`);
         });
       }
-    }, options.gpsUpdateRate * 1000);
+    }, POLL_GPS_INTERVAL * 1000);
   }
 
   plugin.stop =  function() {
@@ -265,6 +268,23 @@ module.exports = function(app) {
     clearInterval(gpsPollProcess);
     app.setPluginStatus('Pluggin stopped');
   };
+
+  function recordSpeed(value) {
+    
+    recordedSpeeds.push(value);
+    
+    if (recordedSpeeds.length > SPEED_SMOOTHING_RANGE) {
+
+      recordedSpeeds.shift();
+    }
+  }
+
+  function smoothSpeed() {
+
+    if(recordedSpeeds.length == 0) return 0;
+    
+    return recordedSpeeds.reduce((a, b) => a + b, 0) / recordedSpeeds.length; 
+  }
 
   function stowDishy() {
     client.Handle({
@@ -395,30 +415,43 @@ module.exports = function(app) {
   }
 
 
-  function haversine(lat1, lon1, lat2, lon2) {
-    const earthRadius = 6371e3; // Radius of the Earth in meters
-    // Convert latitude and longitude from degrees to radians
-    const lat1Rad = lat1 * Math.PI / 180;
-    const lon1Rad = lon1 * Math.PI / 180;
-    const lat2Rad = lat2 * Math.PI / 180;
-    const lon2Rad = lon2 * Math.PI / 180;
-    // Haversine formula
-    const dLat = lat2Rad - lat1Rad;
-    const dLon = lon2Rad - lon1Rad;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = earthRadius * c; // Distance in meters
-    return distance;
+  function haversineDistance(lat1Deg, lon1Deg, lat2Deg, lon2Deg) {
+    
+    function toRad(degree) {
+        return degree * Math.PI / 180;
+    }
+    
+    const lat1 = toRad(lat1Deg);
+    const lon1 = toRad(lon1Deg);
+    const lat2 = toRad(lat2Deg);
+    const lon2 = toRad(lon2Deg);
+    
+    const { sin, cos, sqrt, atan2 } = Math;
+    
+    const R = 6371; // earth radius in km 
+    const dLat = lat2 - lat1;
+    const dLon = lon2 - lon1;
+    const a = sin(dLat / 2) * sin(dLat / 2)
+            + cos(lat1) * cos(lat2)
+            * sin(dLon / 2) * sin(dLon / 2);
+    const c = 2 * atan2(sqrt(a), sqrt(1 - a)); 
+    const d = R * c;
+    
+    return d * 1000; // distance in m
   }
 
   function calculateCourseAndSpeed(interval, lat1, lon1, lat2, lon2) {
+
     // Calculate distance between the two points
-    const distance = haversine(lat1, lon1, lat2, lon2);
+    const distance = haversineDistance(lat1, lon1, lat2, lon2);
+
     // Calculate speed over ground (SOG) in meters per second
-    const speed = distance / POLL_STARLINK_INTERVAL;
+    const speed = distance / interval;
+
     // Calculate course over ground (COG) in radians
     const angle = Math.atan2(lon2 - lon1, lat2 - lat1);
     const course = angle < 0 ? angle + 2 * Math.PI : angle;
+
     return { course, speed };
   }
 
